@@ -6,13 +6,10 @@ const path = require('path');
 const crypto = require('crypto');
 
 const token = process.env.TELEGRAM_BOT_TOKEN;
-// RENDER_EXTERNAL_URL là biến môi trường Render tự động tạo ra cho bạn
 const url = process.env.RENDER_EXTERNAL_URL; 
 const port = process.env.PORT || 3000;
 
-// Khởi tạo bot ở chế độ Webhook
 const bot = new TelegramBot(token, { webHook: true });
-// Đặt webhook URL
 if (url) {
     bot.setWebHook(`${url}/bot${token}`);
 }
@@ -20,18 +17,15 @@ if (url) {
 const app = express();
 app.use(express.json());
 
-// Nhận dữ liệu từ Telegram gửi về
 app.post(`/bot${token}`, (req, res) => {
     bot.processUpdate(req.body);
     res.sendStatus(200);
 });
 
-// Route để Render kiểm tra xem app có đang sống không
 app.get('/', (req, res) => {
     res.send('Bot is running on Render!');
 });
 
-// Bật server Express
 app.listen(port, () => {
     console.log(`Express server is listening on port ${port}`);
 });
@@ -39,7 +33,7 @@ app.listen(port, () => {
 const waitingForFile = new Set();
 
 // --- HÀM GIẢI MÃ ---
-async function processNpvFile(inputPath, outputPath, key, iv) {
+async function processNpvtFile(inputPath, outputPath, key, iv) {
     return new Promise((resolve, reject) => {
         try {
             const algorithm = 'aes-256-cbc';
@@ -60,7 +54,7 @@ bot.onText(/\/start/, (msg) => {
     const chatId = msg.chat.id;
     const options = {
         reply_markup: {
-            inline_keyboard: [[{ text: '🔓 Bắt đầu giải mã file .npv', callback_data: 'start_decrypt' }]]
+            inline_keyboard: [[{ text: '🔓 Bắt đầu giải mã file .npvt', callback_data: 'start_decrypt' }]]
         }
     };
     bot.sendMessage(chatId, 'Chào mừng bạn đến với Bot. Bấm nút bên dưới để bắt đầu.', options);
@@ -70,7 +64,7 @@ bot.on('callback_query', (query) => {
     const chatId = query.message.chat.id;
     if (query.data === 'start_decrypt') {
         waitingForFile.add(chatId);
-        bot.sendMessage(chatId, '📎 Vui lòng đính kèm file `.npv` của bạn vào đây.', { parse_mode: 'Markdown' });
+        bot.sendMessage(chatId, '📎 Vui lòng đính kèm file `.npvt` của bạn vào đây.', { parse_mode: 'Markdown' });
         bot.answerCallbackQuery(query.id);
     }
 });
@@ -80,29 +74,31 @@ bot.on('document', async (msg) => {
     if (!waitingForFile.has(chatId)) return;
 
     const document = msg.document;
-    if (!document.file_name.endsWith('.npv')) {
-        return bot.sendMessage(chatId, '❌ Chỉ chấp nhận file .npv!');
+    
+    // Đã đổi đuôi file thành .npvt ở đây
+    if (!document.file_name.endsWith('.npvt')) {
+        return bot.sendMessage(chatId, '❌ Lỗi: Bot chỉ chấp nhận định dạng file .npvt!');
     }
 
-    bot.sendMessage(chatId, '⏳ Đang xử lý...');
+    bot.sendMessage(chatId, '⏳ Đang xử lý file...');
 
     try {
         const downloadPath = await bot.downloadFile(document.file_id, __dirname);
         const decryptedPath = path.join(__dirname, 'decrypted_' + document.file_name + '.txt');
 
-        // Thay bằng Key/IV thật của bạn
+        // LƯU Ý: Thay bằng Key/IV thật của bạn dành cho file .npvt
         const MY_KEY = Buffer.from('0123456789abcdef0123456789abcdef'); 
         const MY_IV = Buffer.from('abcdef9876543210'); 
 
-        await processNpvFile(downloadPath, decryptedPath, MY_KEY, MY_IV);
+        await processNpvtFile(downloadPath, decryptedPath, MY_KEY, MY_IV);
 
-        await bot.sendDocument(chatId, decryptedPath, { caption: '✅ Thành công!' });
+        await bot.sendDocument(chatId, decryptedPath, { caption: '✅ Giải mã thành công!' });
 
         fs.unlinkSync(downloadPath);
         fs.unlinkSync(decryptedPath);
         waitingForFile.delete(chatId);
     } catch (error) {
-        bot.sendMessage(chatId, `❌ Lỗi: ${error.message}`);
+        bot.sendMessage(chatId, `❌ Quá trình giải mã thất bại:\n${error.message}`);
         waitingForFile.delete(chatId);
     }
 });
