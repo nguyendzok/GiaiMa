@@ -1,143 +1,119 @@
-require('dotenv').config();
-const TelegramBot = require('node-telegram-bot-api');
-const express = require('express');
-const fs = require('fs');
-const path = require('path');
-const crypto = require('crypto');
+import telebot
+from telebot.types import ReplyKeyboardMarkup, KeyboardButton
+from playwright.sync_api import sync_playwright
+import time
+import random
 
-const token = process.env.TELEGRAM_BOT_TOKEN;
-const url = process.env.RENDER_EXTERNAL_URL; 
-const port = process.env.PORT || 3000;
+# Nhớ thay Token của bạn vào đây
+TOKEN = os.environ.get('BOT_TOKEN')
+bot = telebot.TeleBot(TOKEN)
 
-const bot = new TelegramBot(token, { webHook: true });
-if (url) {
-    bot.setWebHook(`${url}/bot${token}`);
-}
+def hardcore_bypass(url, status_callback):
+    """
+    Hàm Playwright có thêm 'status_callback' để báo cáo tiến trình về cho Telegram
+    """
+    try:
+        with sync_playwright() as p:
+            # Báo cáo Bước 1
+            status_callback("⏳ [1/5] Đang khởi tạo trình duyệt ảo...")
+            browser = p.chromium.launch(headless=True)
+            context = browser.new_context(
+                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                viewport={'width': 1920, 'height': 1080}
+            )
+            page = context.new_page()
+            
+            # Báo cáo Bước 2
+            status_callback("🌐 [2/5] Đang truy cập trang web rút gọn...")
+            page.goto(url, timeout=60000)
+            time.sleep(3)
+            
+            # Báo cáo Bước 3
+            status_callback("📜 [3/5] Đang giả lập hành vi cuộn trang của người thật...")
+            for _ in range(3):
+                page.mouse.wheel(0, random.randint(300, 700))
+                time.sleep(random.uniform(1, 2))
+            page.mouse.wheel(0, -400)
+            time.sleep(1)
+            page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+            
+            # Báo cáo Bước 4
+            status_callback("🖱️ [4/5] Đang tìm kiếm quảng cáo & Chờ thời gian đếm ngược (khoảng 15-20s)...")
+            
+            # (Đoạn code click quảng cáo ẩn đi cho gọn, web sẽ tự đếm ngược trong thời gian này)
+            time.sleep(15) 
+            
+            # Báo cáo Bước 5
+            status_callback("🔍 [5/5] Đang trích xuất mã và lấy link trang đích...")
+            time.sleep(5)
+            
+            final_url = page.url
+            browser.close()
+            
+            # Trả về kết quả cuối cùng
+            if url in final_url or "m4" in final_url:
+                return f"⚠️ Bot đã chạy xong nhưng web chưa nhả link. URL hiện tại: {final_url}"
+            else:
+                return final_url
 
-const app = express();
-app.use(express.json());
+    except Exception as e:
+        return f"❌ Lỗi trong quá trình chạy: {str(e)}"
 
-app.post(`/bot${token}`, (req, res) => {
-    bot.processUpdate(req.body);
-    res.sendStatus(200);
-});
+# ==========================================
+# CÁC LỆNH CỦA TELEGRAM BOT
+# ==========================================
 
-app.get('/', (req, res) => {
-    res.send('Bot is running on Render!');
-});
+@bot.message_handler(commands=['start', 'help'])
+def send_welcome(message):
+    """Xử lý lệnh /start và hiện nút bấm"""
+    # Tạo nút bấm dưới bàn phím
+    markup = ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=False)
+    btn = KeyboardButton("🔗 Gửi link cần vượt")
+    markup.add(btn)
+    
+    bot.send_message(
+        message.chat.id, 
+        "👋 Xin chào! Mình là Bot hỗ trợ vượt link tự động.\nHãy ấn nút bên dưới để bắt đầu nhé!", 
+        reply_markup=markup
+    )
 
-app.listen(port, () => {
-    console.log(`Express server is listening on port ${port}`);
-});
+@bot.message_handler(func=lambda message: message.text == "🔗 Gửi link cần vượt")
+def ask_for_link(message):
+    """Xử lý khi người dùng bấm nút"""
+    bot.reply_to(message, "📝 Vui lòng dán link bạn cần vượt vào khung chat và gửi cho mình nhé 🔽")
 
-// --- LƯU TRỮ TRẠNG THÁI NGƯỜI DÙNG ---
-// Cấu trúc: { "chatId": { step: "WAITING_FILE" | "WAITING_KEY", filePath: "...", fileName: "..." } }
-const userStates = {};
+@bot.message_handler(func=lambda message: "http" in message.text)
+def handle_link(message):
+    """Xử lý khi người dùng gửi link"""
+    # 1. Gửi tin nhắn trạng thái ban đầu và lưu lại message_id
+    msg = bot.reply_to(message, "🚀 Bắt đầu tiếp nhận link...")
+    
+    # Hàm con để cập nhật tin nhắn (edit_message)
+    def update_status(text):
+        try:
+            bot.edit_message_text(
+                chat_id=message.chat.id, 
+                message_id=msg.message_id, 
+                text=text
+            )
+        except:
+            # Bỏ qua lỗi nếu nội dung cập nhật bị trùng với nội dung cũ
+            pass
 
-// --- HÀM GIẢI MÃ ---
-async function processNpvtFile(inputPath, outputPath, key, iv) {
-    return new Promise((resolve, reject) => {
-        try {
-            const algorithm = 'aes-256-cbc';
-            const decipher = crypto.createDecipheriv(algorithm, key, iv);
-            const input = fs.createReadStream(inputPath);
-            const output = fs.createWriteStream(outputPath);
-            input.pipe(decipher).pipe(output);
-            output.on('finish', () => resolve(true));
-            decipher.on('error', () => reject(new Error('Key không hợp lệ hoặc file bị sai cấu trúc.')));
-        } catch (error) {
-            reject(error);
-        }
-    });
-}
+    # 2. Gọi hàm vượt link và truyền hàm cập nhật trạng thái vào
+    result = hardcore_bypass(message.text, update_status)
+    
+    # 3. BÁO CÁO HOÀN THÀNH VÀ IN RA LINK ĐÍCH
+    thong_bao_hoan_thanh = f"✅ **HOÀN THÀNH!**\n\n🔗 **Link trang đích của bạn:**\n{result}"
+    
+    bot.edit_message_text(
+        chat_id=message.chat.id, 
+        message_id=msg.message_id, 
+        text=thong_bao_hoan_thanh,
+        parse_mode='Markdown',
+        disable_web_page_preview=True
+    )
 
-// --- BƯỚC 1: LỆNH START VÀ NÚT BẤM ---
-bot.onText(/\/start/, (msg) => {
-    const chatId = msg.chat.id;
-    const options = {
-        reply_markup: {
-            inline_keyboard: [[{ text: '🔓 Bắt đầu giải mã file .npvt', callback_data: 'start_decrypt' }]]
-        }
-    };
-    bot.sendMessage(chatId, 'Chào mừng bạn! Bấm nút bên dưới để bắt đầu luồng giải mã.', options);
-});
-
-bot.on('callback_query', (query) => {
-    const chatId = query.message.chat.id;
-    if (query.data === 'start_decrypt') {
-        // Chuyển trạng thái sang chờ nhận file
-        userStates[chatId] = { step: 'WAITING_FILE' };
-        bot.sendMessage(chatId, '📎 Vui lòng đính kèm file `.npvt` của bạn vào đây.', { parse_mode: 'Markdown' });
-        bot.answerCallbackQuery(query.id);
-    }
-});
-
-// --- BƯỚC 2: NHẬN FILE VÀ HỎI KEY ---
-bot.on('document', async (msg) => {
-    const chatId = msg.chat.id;
-    const state = userStates[chatId];
-
-    // Bỏ qua nếu user không ở trạng thái chờ file
-    if (!state || state.step !== 'WAITING_FILE') return;
-
-    const document = msg.document;
-    if (!document.file_name.endsWith('.npvt')) {
-        return bot.sendMessage(chatId, '❌ Lỗi: Bot chỉ chấp nhận định dạng file .npvt!');
-    }
-
-    bot.sendMessage(chatId, '⏳ Đang lưu file. Vui lòng gửi tin nhắn chứa **Key giải mã** của file này:', { parse_mode: 'Markdown' });
-
-    try {
-        // Tải file về và lưu đường dẫn vào trạng thái của user
-        const downloadPath = await bot.downloadFile(document.file_id, __dirname);
-        userStates[chatId] = {
-            step: 'WAITING_KEY',
-            filePath: downloadPath,
-            fileName: document.file_name
-        };
-    } catch (error) {
-        bot.sendMessage(chatId, `❌ Lỗi khi tải file: ${error.message}`);
-        delete userStates[chatId]; // Reset trạng thái nếu lỗi
-    }
-});
-
-// --- BƯỚC 3: NHẬN KEY TỪ NGƯỜI DÙNG VÀ GIẢI MÃ ---
-bot.on('message', async (msg) => {
-    const chatId = msg.chat.id;
-    const text = msg.text;
-    const state = userStates[chatId];
-
-    // Bỏ qua nếu là lệnh start, file document, hoặc user không ở bước chờ Key
-    if (!text || text.startsWith('/') || !state || state.step !== 'WAITING_KEY') return;
-
-    bot.sendMessage(chatId, '⚙️ Đang tiến hành giải mã với Key bạn vừa cung cấp...');
-
-    try {
-        const decryptedPath = path.join(__dirname, 'decrypted_' + state.fileName + '.txt');
-
-        // CHUẨN BỊ KEY: AES-256 yêu cầu Key phải dài chính xác 32 bytes (256 bits).
-        // Đoạn code này sẽ lấy Key do user nhập, tự động cắt đi hoặc bù thêm số 0 cho đủ 32 bytes.
-        let userKeyBuffer = Buffer.alloc(32); 
-        Buffer.from(text, 'utf8').copy(userKeyBuffer);
-
-        // LƯU Ý: IV (Vector khởi tạo) hiện tại vẫn đang được fix cứng. 
-        // Nếu IV của bạn mỗi file mỗi khác, bạn sẽ cần tách nó từ header của file .npvt.
-        const MY_IV = Buffer.from('abcdef9876543210'); 
-
-        // Chạy hàm giải mã
-        await processNpvtFile(state.filePath, decryptedPath, userKeyBuffer, MY_IV);
-
-        // Gửi trả file
-        await bot.sendDocument(chatId, decryptedPath, { caption: '✅ Giải mã thành công!' });
-
-        // Dọn dẹp file tạm và reset trạng thái người dùng
-        fs.unlinkSync(state.filePath);
-        fs.unlinkSync(decryptedPath);
-        delete userStates[chatId];
-
-    } catch (error) {
-        bot.sendMessage(chatId, `❌ Quá trình giải mã thất bại. Sai Key hoặc cấu trúc file không đúng.\nChi tiết: ${error.message}`);
-        // Không xóa trạng thái để user có thể nhập lại Key khác cho file vừa gửi
-        bot.sendMessage(chatId, '🔄 Bạn có thể thử gửi lại Key khác, hoặc gõ /start để làm lại từ đầu.');
-    }
-});
+if __name__ == '__main__':
+    print("Bot đang chạy... Bấm Ctrl+C để dừng.")
+    bot.infinity_polling()
