@@ -1,10 +1,11 @@
+import os
 import telebot
 from telebot.types import ReplyKeyboardMarkup, KeyboardButton
 from playwright.sync_api import sync_playwright
 import time
 import random
 
-# Nhớ thay Token của bạn vào đây
+# Lấy Token từ biến môi trường của Render
 TOKEN = os.environ.get('BOT_TOKEN')
 bot = telebot.TeleBot(TOKEN)
 
